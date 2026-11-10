@@ -1,0 +1,12 @@
+# Build outputs and signing keys
+output/
+*.apk
+*.aab
+.env
+.keystore/
+*.keystore
+*.jks
+
+# OS / editor
+.DS_Store
+Thumbs.db

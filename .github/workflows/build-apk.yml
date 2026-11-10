@@ -1,0 +1,156 @@
+# Web2APK - build ONE Android APK from this project (works from a phone, no file editing needed).
+#
+# HOW TO USE (phone or computer):
+#   Actions tab -> Build APK -> Run workflow -> fill the form (all fields optional) -> Run.
+#   When it turns green: open the run -> Artifacts -> apk.
+#
+# Value order for every setting:  form field  >  .github/app.json  >  Web2APK defaults.
+# An empty form field is ignored, so you only type what you want to change.
+#
+# Layout:
+#   .github/workflows/build-apk.yml   (this file - leave as is)
+#   .github/app.json                  (optional saved settings)
+#   .github/icon.png                  (optional app icon)
+#   public/                           (your website files, used when "url" is empty)
+#
+# This workflow always uses an official, tagged Web2APK release (never local code).
+# By default that is the newest release; set WEB2APK_REF below to pin one tag.
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+    # A push that changes ONLY .md files (README, notes) does not start a build.
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      appName:
+        description: 'App name (empty = app.json)'
+        required: false
+        default: ''
+        type: string
+      appId:
+        description: 'Package id, e.g. com.me.shop (empty = app.json)'
+        required: false
+        default: ''
+        type: string
+      url:
+        description: 'Website to load, e.g. https://example.com (empty = app.json / public folder)'
+        required: false
+        default: ''
+        type: string
+      versionName:
+        description: 'Version shown to users, e.g. 1.0.0 (empty = app.json)'
+        required: false
+        default: ''
+        type: string
+      versionCode:
+        description: 'Whole number, must grow every release (empty = app.json)'
+        required: false
+        default: ''
+        type: string
+      iconUrl:
+        description: 'Direct https link to a square PNG icon (empty = .github/icon.png)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # The public Web2APK repo that does the real work, as  owner/repo.
+  WEB2APK_REPO: bhawan-kavinda/Web2APK
+  # Which Web2APK release to use.
+  #   'latest'  = always the newest release tag (vX.Y.Z) of the Web2APK repo.
+  #   a tag     = pin one exact release (safest: the build script receives your signing secrets,
+  #               so a pinned tag never changes under you).
+  # Branches are never followed - only release tags. (Empty = same as 'latest'.)
+  WEB2APK_REF: 'latest'
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Download icon from form link (optional)
+        env:
+          ICON_URL: ${{ inputs.iconUrl }}
+        run: |
+          if [ -n "$ICON_URL" ]; then
+            case "$ICON_URL" in
+              https://*) ;;
+              *) echo "::error::iconUrl must start with https://"; exit 1 ;;
+            esac
+            mkdir -p .github
+            curl -fsSL --max-time 30 --max-filesize 10485760 -o .github/icon.png -- "$ICON_URL" \
+              || { echo "::error::Could not download the icon from iconUrl"; exit 1; }
+            case "$(file -b --mime-type .github/icon.png)" in
+              image/*) echo "Icon downloaded from iconUrl" ;;
+              *) echo "::error::iconUrl did not return an image (use a direct link to a PNG file)"; exit 1 ;;
+            esac
+          fi
+
+      - name: Check config files
+        run: |
+          for f in app.json icon.png; do
+            if [ ! -f ".github/$f" ]; then
+              echo "::warning::.github/$f is missing - Web2APK's default is used instead."
+            fi
+          done
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Get Web2APK (official release)
+        run: |
+          REPO_URL="https://github.com/$WEB2APK_REPO.git"
+          REF="$WEB2APK_REF"
+          if [ -z "$REF" ] || [ "$REF" = "latest" ]; then
+            # newest release tag of the form vX.Y.Z (no branches, no pre-release tags)
+            REF=$(git ls-remote --tags --refs --sort=-v:refname "$REPO_URL" 'v*' | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+            if [ -z "$REF" ]; then
+              echo "::error::No release tag (vX.Y.Z) found in $WEB2APK_REPO. Publish a release, or set WEB2APK_REF to a tag."
+              exit 1
+            fi
+          fi
+          echo "Cloning official Web2APK $REF"
+          git clone --depth 1 --branch "$REF" "$REPO_URL" "$RUNNER_TEMP/Web2APK"
+          echo "W2A_DIR=$RUNNER_TEMP/Web2APK" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          WEB_DIR: ${{ github.workspace }}
+          CONFIG_DIR: ${{ github.workspace }}/.github
+          OUT_DIR: ${{ github.workspace }}/output
+          # Form fields (empty = ignored). Passed as env vars on purpose: never inline them in a script.
+          W2A_APP_NAME: ${{ inputs.appName }}
+          W2A_APP_ID: ${{ inputs.appId }}
+          W2A_URL: ${{ inputs.url }}
+          W2A_VERSION_NAME: ${{ inputs.versionName }}
+          W2A_VERSION_CODE: ${{ inputs.versionCode }}
+          # Optional signing key. Empty = a temporary key is generated.
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: node "$W2A_DIR/scripts/build.mjs"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: output/*.apk
+          if-no-files-found: error
