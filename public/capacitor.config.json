@@ -1,0 +1,9 @@
+{
+  "appId": "com.afrobeatinstrumental.app",
+  "appName": "Afrobeat Instrumental",
+  "webDir": "apk",
+  "server": {
+    "url": "https://afrobeatinstrumental.lovable.app",
+    "cleartext": false
+  }
+}
