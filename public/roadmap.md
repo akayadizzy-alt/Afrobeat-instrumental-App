@@ -1,0 +1,4 @@
+- [x] Add compact footer links and live, in-app WordPress pages for verified site policies and information.
+- [x] Add a browser-only song matcher using live catalogue candidates and mobile navigation, with no AI service or database.
+- [x] Remove unused external-account middleware and keep WordPress as the app's only content backend.
+- [x] Test route matching and recommendation filtering; verify preview and current build status.
